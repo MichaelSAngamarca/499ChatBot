@@ -8,7 +8,7 @@ dotenv
 pillow
 langchain_community
 
-You can do a simple install by doing the command uv pip install -r requirments.txt. if this does not work then you can simply manually install by doing pip install then the package name. 
+You can do a simple install by doing the command uv pip install -r requirments.txt. if this does not work then you can simply manually install by doing pip  install then the package name. 
 
 Id recomended you setup the virtual enviroment by simply doing python= -m venv venv which sets up a local virtual enviroment. 
 
