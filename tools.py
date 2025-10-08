@@ -16,6 +16,7 @@ def save_to_txt(parameters):
     
     with open(filename, "a", encoding="utf-8") as file:
         file.write(formatted_data + "\n")
+
 client_tools = ClientTools()
 client_tools.register("searchWeb",searchWeb)
 client_tools.register("saveToTxt",save_to_txt)
