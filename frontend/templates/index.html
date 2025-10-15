@@ -1,0 +1,23 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>TalkAssist</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+    <!--Main Chat Area-->
+    <div class="chat-container">
+        <div class="chat-bubble bot" id="botMessage">Ask me anything...</div>
+        <div class="chat-bubble user" id="userMessage"></div>
+    </div>
+
+    <!--Mic Button-->
+    <button id="micButton" class="mic-btn">
+        🎤
+    </button>
+
+    <script src="{{  url_for('static', filename='script.js') }}"></script>
+</body>
+</html>
