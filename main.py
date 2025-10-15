@@ -31,4 +31,3 @@ signal.signal(signal.SIGINT, lambda sig, frame: conversation.end_session())
 
 conversation_id = conversation.wait_for_session_end()
 print(f"Conversation ID: {conversation_id}")
-

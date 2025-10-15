@@ -1,0 +1,13 @@
+elevenlabs
+pyaudio
+openai
+python-dotenv
+pillow
+langchain_community
+#wave
+
+#offline mode dependencies
+openai-whisper
+pyttsx3
+apscheduler
+requests 
