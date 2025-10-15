@@ -113,7 +113,7 @@ class OfflineMode:
         # Checking if the audio was too low to process
         # if no speech was detected
         # saved audio to a temp file and transcribe it
-        if avg_volume < 100:
+        if avg_volume < 50:
             return ""
         temp_file = "temp_audio.wav"
         wf = wave.open(temp_file, 'wb')
