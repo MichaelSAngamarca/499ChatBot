@@ -15,10 +15,11 @@ body {
 .chat-container {
     width: 80%;
     max-width: 500px;
-    max-height: 300px;
+    max-height: 400px;
     display: flex;
     flex-direction: column;
     justify-content: flex-end;
+    overflow-y: auto;
     margin-bottom: 20px;
 }
 
@@ -29,6 +30,7 @@ body {
     margin: 8px;
     max-width: 70%;
     word-wrap: break-word;
+    animation: fadeIn 0.3s ease;
 }
 
 .chat-bubble.bot {
@@ -48,11 +50,30 @@ body {
     border: none;
     border-radius: 50%;
     padding: 20px;
-    font-size: 24px;
+    font-size: 28px;
     cursor: pointer;
-    transition: transform 0.2s ease;
+    transition: all 0.3s ease;
+}
+
+/* Big mic (pre-convo) */
+.mic-btn.large {
+    transform: scale(1.5);
+    margin-top: 20px;
+}
+
+/* Small mic (post-convo) */
+.mic-btn.small {
+    align-self: flex-end;
+    position: fixed;
+    bottom: 30px;
+    right: 30px;
 }
 
 .mic-btn:hover {
-    transform: scale(1.1);
+    transform: scale(1.2);
+}
+
+@keyframes fadeIn {
+    from { opacity: 0; transform: translateY(5px); }
+    to { opacity: 1; transform: translateY(0); }
 }
