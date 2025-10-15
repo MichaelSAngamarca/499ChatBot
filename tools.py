@@ -4,55 +4,90 @@ from datetime import datetime
 from dotenv import load_dotenv
 from elevenlabs.conversational_ai.conversation import ClientTools
 from langchain_community.tools import DuckDuckGoSearchRun
-from metar import Metar
 load_dotenv()
-weatherAPIKey = os.getenv("WEATHER_API_KEY")
-
-def get_region_info(parameters=None):
+def get_region_info(parameters):
+    location = parameters.get("location")
+    if not location:
+        return "Please provide a location."
+    
     try:
-        city = parameters.get("city") if parameters else None
-        if not city:
-            geoData = requests.get("https://ipapi.co/json/").json()
-            city = geoData.get("city")
+        geo_url = "https://nominatim.openstreetmap.org/search"
+        geo_params = {"q": location, "format": "json"}
+        geo_res = requests.get(geo_url, params=geo_params).json()
 
-        if not city:
-            return {"error": "Could not determine city"}
+        if not geo_res:
+            return f"Could not find location: {location}"
 
-        search = DuckDuckGoSearchRun()
-        query = f"{city} airport ICAO code"
-        result = search.run(query)
-        lines = result.split()
-        icao = None
-        for token in lines:
-            if len(token) == 4 and token.isalpha():
-                icao = token.upper()
-                break
-        if not icao:
-            return {"error": f"Could not determine ICAO code for {city}"}
+        lat = geo_res[0]["lat"]
+        lon = geo_res[0]["lon"]
 
-        # Download latest METAR report
-        metar_url = f"https://tgftp.nws.noaa.gov/data/observations/metar/stations/{icao}.TXT"
-        response = requests.get(metar_url)
-        if response.status_code != 200:
-            return {"error": f"Could not retrieve METAR data for {icao}"}
+        tz_url = f"https://timeapi.io/api/TimeZone/coordinate?latitude={lat}&longitude={lon}"
+        tz_res = requests.get(tz_url).json()
+        timezone = tz_res.get("timeZone", None)
 
-        metar_text = response.text.strip().split("\n")[-1]
-        obs = Metar.Metar(metar_text)
+        if not timezone:
+            return f"Could not find timezone for {location}."
 
-        temp_c = obs.temp.value("C") if obs.temp else None
-        humidity = obs.rel_humidity()
-        condition = obs.present_weather() or obs.sky_conditions()
-        time = obs.time if obs.time else datetime.utcnow()
+        time_url = f"https://timeapi.io/api/Time/current/zone?timeZone={timezone}"
+        time_res = requests.get(time_url).json()
 
-        return {
-            "location": f"{city} ({icao})",
-            "local_time": time.strftime("%Y-%m-%d %H:%M:%S"),
-            "temperature": f"{temp_c:.1f}°C" if temp_c else "N/A",
-            "humidity": f"{humidity:.0f}%" if humidity else "N/A",
-            "conditions": condition or "Unknown"
-        }
+        current_time = time_res.get("dateTime", None)
+        if not current_time:
+            return f"Could not get current time for {location}."
+
+        return f"The current time in {location} ({timezone}) is {current_time}"
+
     except Exception as e:
-        return {"error": str(e)}
+        return f"Error getting region info: {e}"
+
+def get_weather_info(parameters):
+    location = parameters.get("location")
+    if not location:
+        return "Please provide a location."
+
+    try:
+        geo_url = "https://nominatim.openstreetmap.org/search"
+        geo_params = {"q": location, "format": "json"}
+        geo_res = requests.get(geo_url, params=geo_params).json()
+
+        if not geo_res:
+            return f"Could not find location: {location}"
+
+        lat = geo_res[0]["lat"]
+        lon = geo_res[0]["lon"]
+
+        weather_url = (
+            f"https://api.open-meteo.com/v1/forecast?"
+            f"latitude={lat}&longitude={lon}&current_weather=true"
+        )
+        weather_res = requests.get(weather_url).json()
+
+        current_weather = weather_res.get("current_weather", {})
+        if not current_weather:
+            return f"Could not retrieve weather for {location}."
+
+        temperature = current_weather.get("temperature")
+        windspeed = current_weather.get("windspeed")
+        conditions = current_weather.get("weathercode")
+
+        weather_map = {
+            0: "clear sky", 1: "mainly clear", 2: "partly cloudy", 3: "overcast",
+            45: "foggy", 48: "freezing fog", 51: "light drizzle", 53: "moderate drizzle",
+            55: "dense drizzle", 61: "light rain", 63: "moderate rain", 65: "heavy rain",
+            71: "light snow", 73: "moderate snow", 75: "heavy snow", 95: "thunderstorm",
+        }
+
+        condition_text = weather_map.get(conditions, "unknown conditions")
+
+        # Step 3: Format response
+        return (
+            f"The current weather in {location} is {condition_text} "
+            f"with a temperature of {temperature}°C and windspeed of {windspeed} km/h."
+        )
+
+    except Exception as e:
+        return f"Error getting weather info: {e}"
+
 def search_web(parameters):
     query = parameters.get("query") if parameters else None
     if not query:
@@ -78,3 +113,4 @@ client_tools = ClientTools()
 client_tools.register("searchWeb", search_web)
 client_tools.register("saveToTxt", save_to_txt)
 client_tools.register("getRegionInfo", get_region_info)
+client_tools.register("getWeatherInfo",get_weather_info)
