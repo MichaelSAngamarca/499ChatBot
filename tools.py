@@ -9,7 +9,6 @@ def get_region_info(parameters):
     location = parameters.get("location")
     if not location:
         return "Please provide a location."
-    
     try:
         geo_url = "https://nominatim.openstreetmap.org/search"
         geo_params = {"q": location, "format": "json"}
@@ -78,8 +77,6 @@ def get_weather_info(parameters):
         }
 
         condition_text = weather_map.get(conditions, "unknown conditions")
-
-        # Step 3: Format response
         return (
             f"The current weather in {location} is {condition_text} "
             f"with a temperature of {temperature}°C and windspeed of {windspeed} km/h."
@@ -87,6 +84,45 @@ def get_weather_info(parameters):
 
     except Exception as e:
         return f"Error getting weather info: {e}"
+    
+def get_date_info(parameters):
+    location = parameters.get("location")
+    try:
+        if location:
+            geo_url = "https://nominatim.openstreetmap.org/search"
+            geo_params = {"q": location, "format": "json"}
+            geo_res = requests.get(geo_url, params=geo_params).json()
+
+            if not geo_res:
+                return f"Could not find location: {location}"
+
+            lat = geo_res[0]["lat"]
+            lon = geo_res[0]["lon"]
+
+            tz_url = f"https://timeapi.io/api/TimeZone/coordinate?latitude={lat}&longitude={lon}"
+            tz_res = requests.get(tz_url).json()
+            timezone = tz_res.get("timeZone", None)
+
+            if not timezone:
+                return f"Could not find timezone for {location}."
+
+            time_url = f"https://timeapi.io/api/Time/current/zone?timeZone={timezone}"
+            time_res = requests.get(time_url).json()
+
+            date_string = time_res.get("date", None)
+            day_of_week = time_res.get("dayOfWeek", None)
+
+            if not date_string:
+                return f"Could not get date for {location}."
+
+            return f"Today’s date in {location} ({timezone}) is {day_of_week}, {date_string}."
+        else:
+            now = datetime.now()
+            formatted_date = now.strftime("%A, %Y-%m-%d")
+            return f"Today’s date is {formatted_date}."
+
+    except Exception as e:
+        return f"Error getting date info: {e}"
 
 def search_web(parameters):
     query = parameters.get("query") if parameters else None
@@ -114,3 +150,4 @@ client_tools.register("searchWeb", search_web)
 client_tools.register("saveToTxt", save_to_txt)
 client_tools.register("getRegionInfo", get_region_info)
 client_tools.register("getWeatherInfo",get_weather_info)
+client_tools.register("getDateInfo", get_date_info)
