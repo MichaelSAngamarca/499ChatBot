@@ -11,3 +11,4 @@ openai-whisper
 pyttsx3
 apscheduler
 requests 
+os
