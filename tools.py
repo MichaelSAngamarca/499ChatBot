@@ -12,7 +12,9 @@ def get_region_info(parameters):
     try:
         geo_url = "https://nominatim.openstreetmap.org/search"
         geo_params = {"q": location, "format": "json"}
-        geo_res = requests.get(geo_url, params=geo_params).json()
+        #geo_res = requests.get(geo_url, params=geo_params).json()
+        geo_res = requests.get(geo_url, params=geo_params, headers={"User-Agent": "TalkAssistBot/1.0"}).json()
+
 
         if not geo_res:
             return f"Could not find location: {location}"
@@ -47,7 +49,9 @@ def get_weather_info(parameters):
     try:
         geo_url = "https://nominatim.openstreetmap.org/search"
         geo_params = {"q": location, "format": "json"}
-        geo_res = requests.get(geo_url, params=geo_params).json()
+        #geo_res = requests.get(geo_url, params=geo_params).json()
+        geo_res = requests.get(geo_url, params=geo_params, headers={"User-Agent": "TalkAssistBot/1.0"}).json()
+
 
         if not geo_res:
             return f"Could not find location: {location}"
@@ -91,7 +95,9 @@ def get_date_info(parameters):
         if location:
             geo_url = "https://nominatim.openstreetmap.org/search"
             geo_params = {"q": location, "format": "json"}
-            geo_res = requests.get(geo_url, params=geo_params).json()
+            #geo_res = requests.get(geo_url, params=geo_params).json()
+            geo_res = requests.get(geo_url, params=geo_params, headers={"User-Agent": "TalkAssistBot/1.0"}).json()
+
 
             if not geo_res:
                 return f"Could not find location: {location}"
