@@ -1,7 +1,15 @@
-from flask import Flask, render_template, request, jsonify
+from flask import Flask, render_template, request, jsonify, send_file
 from tools import get_weather_info, get_region_info, get_date_info, search_web
+from io import BytesIO
+from elevenlabs import ElevenLabs, play
 import os
 import subprocess
+
+# Initialize ElevenLabs client
+from dotenv import load_dotenv
+load_dotenv()
+api_key = os.getenv("ELEVENLABS_API_KEY")
+elevenlabs = ElevenLabs(api_key=api_key)
 
 # Initialize Flask app
 app = Flask(
@@ -37,6 +45,31 @@ def ask():
         response = "I'm not sure how to help with that yet."
 
     return jsonify({"response": response})
+
+@app.route("/speak", methods=["POST"])
+def speak():
+    data = request.get_json()
+    text = data.get("text", "")
+
+    if not text:
+        return jsonify({"error": "No text provided"}), 400
+
+    try:
+        # Generate speech
+        audio = elevenlabs.text_to_speech.convert(
+            voice_id="Rachel",  # or any available voice ID
+            output_format="mp3_44100_128",
+            text=text
+        )
+
+        # Return as audio file
+        return send_file(
+            BytesIO(audio),
+            mimetype="audio/mpeg",
+            as_attachment=False
+        )
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
 
 def extract_location(text):
     """A quick helper to find a location keyword from user input."""
