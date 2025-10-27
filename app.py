@@ -5,25 +5,24 @@ from elevenlabs import ElevenLabs, play
 import os
 import subprocess
 
-# Initialize ElevenLabs client
+
 from dotenv import load_dotenv
 load_dotenv()
 api_key = os.getenv("ELEVENLABS_API_KEY")
 elevenlabs = ElevenLabs(api_key=api_key)
 
-# Initialize Flask app
+
 app = Flask(
     __name__,
     template_folder="frontend/templates",
     static_folder="frontend/static"
 )
 
-# Home route -> loads GUI
 @app.route("/")
 def index():
     return render_template("index.html")
 
-# Chat API route -> handles user messages
+
 @app.route("/ask", methods=["POST"])
 def ask():
     user_input = request.json.get("message", "").lower()
@@ -55,14 +54,12 @@ def speak():
         return jsonify({"error": "No text provided"}), 400
 
     try:
-        # Generate speech
         audio = elevenlabs.text_to_speech.convert(
-            voice_id="Rachel",  # or any available voice ID
+            voice_id="Rachel",  
             output_format="mp3_44100_128",
             text=text
         )
 
-        # Return as audio file
         return send_file(
             BytesIO(audio),
             mimetype="audio/mpeg",
@@ -73,7 +70,6 @@ def speak():
 
 def extract_location(text):
     """A quick helper to find a location keyword from user input."""
-    # Basic version: looks for 'in <place>'
     if "in " in text:
         return text.split("in ")[1].strip()
     return None

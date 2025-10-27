@@ -40,7 +40,6 @@ class OfflineMode:
         self.load_reminders()
 
     def speak(self, text):
-        # This function is to convert text to speech
         print(f"TalkAssist: {text}")
         try:
             engine = pyttsx3.init()
@@ -53,13 +52,11 @@ class OfflineMode:
             print(f"TTS Error: {e}")
 
     def check_audio_level(self, audio_data):
-        #checking the volume level of audio data
         audio_np = np.frombuffer(audio_data, dtype=np.int16)
         volume = np.abs(audio_np).mean()
         return volume
 
     def listen(self, max_duration=7, silence_duration=3.5):
-        # is able to record audio with automatic silence detection. Will stp recording after silence_durantion seconds of silence
         audio = pyaudio.PyAudio()
         stream = audio.open(
             format=self.FORMAT,
@@ -81,12 +78,10 @@ class OfflineMode:
             data = stream.read(self.CHUNK, exception_on_overflow=False)
             frames.append(data)
 
-            # Checking the volume level
             volume = self.check_audio_level(data)
             total_volume += volume
             num_chunks += 1
 
-            # this will show when sound is detected
             if volume > 200:  # speech detected
                 print("█", end="", flush=True)
                 silence_chunks = 0
@@ -102,17 +97,12 @@ class OfflineMode:
 
         print()
 
-        # for stopping the recording
         stream.stop_stream()
         stream.close()
         audio.terminate()
 
         avg_volume = total_volume / num_chunks if num_chunks > 0 else 0
         print(f"Average audio level: {avg_volume:.0f}")
-
-        # Checking if the audio was too low to process
-        # if no speech was detected
-        # saved audio to a temp file and transcribe it
         if avg_volume < 50:
             return ""
         temp_file = "temp_audio.wav"

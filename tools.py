@@ -4,11 +4,22 @@ from datetime import datetime
 from dotenv import load_dotenv
 from elevenlabs.conversational_ai.conversation import ClientTools
 from langchain_community.tools import DuckDuckGoSearchRun
+from connectivity_checker import check_internet_connectivity, safe_api_call
 load_dotenv()
+def handle_api_failure(error_msg, fallback_msg="I'm sorry, I'm having trouble connecting to the internet. Please check your connection and try again."):
+    
+    if not check_internet_connectivity():
+        return "I'm currently offline and cannot access this information. Please check your internet connection."
+    return f"Error: {error_msg}. {fallback_msg}"
+
 def get_region_info(parameters):
     location = parameters.get("location")
     if not location:
         return "Please provide a location."
+    
+    if not check_internet_connectivity():
+        return handle_api_failure("No internet connection available")
+    
     try:
         geo_url = "https://nominatim.openstreetmap.org/search"
         geo_params = {"q": location, "format": "json"}
@@ -45,6 +56,10 @@ def get_weather_info(parameters):
     location = parameters.get("location")
     if not location:
         return "Please provide a location."
+    
+    # Check internet connectivity first
+    if not check_internet_connectivity():
+        return handle_api_failure("No internet connection available")
 
     try:
         geo_url = "https://nominatim.openstreetmap.org/search"
@@ -91,6 +106,10 @@ def get_weather_info(parameters):
     
 def get_date_info(parameters):
     location = parameters.get("location")
+    
+    if location and not check_internet_connectivity():
+        return handle_api_failure("No internet connection available")
+    
     try:
         if location:
             geo_url = "https://nominatim.openstreetmap.org/search"
@@ -134,8 +153,15 @@ def search_web(parameters):
     query = parameters.get("query") if parameters else None
     if not query:
         return "No query provided."
-    search = DuckDuckGoSearchRun()
-    return search.run(query)
+    
+    if not check_internet_connectivity():
+        return handle_api_failure("No internet connection available")
+    
+    try:
+        search = DuckDuckGoSearchRun()
+        return search.run(query)
+    except Exception as e:
+        return handle_api_failure(f"Search failed: {str(e)}")
 
 def save_to_txt(parameters):
     filename = parameters.get("filename")

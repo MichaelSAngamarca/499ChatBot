@@ -18,36 +18,4 @@ You can ask it some questons but as of right now does not do much. To end the co
 NOTE**
 Make sure you have the virtual enviroment activated by running .\venv\Scripts\activate 
 
-### Offline Mode (Local Processing)
-- ***tTime queries***: "What time is it?"
-- ***Date Queries***: "What is the date?", "What day is today?"
-- **Natural language reminders**
--  "Remind me to call mom in 4 hours"
--  "Remind me to take my medecine tomorrow at 3pm"
--  "Set a reminder Monday at 9am to eat breakfast"
-- **List reminder**: "what are my reminders?"
-- **Storage**: Reminders are saved acroos sessions
-
-### Supported time formats
-- Today: "today at 5pm"
-- Tomorrow: "tomorrow", "tomorrow at 3pm"
-- Weekdays: "Monday at 9am", "next friday at 2pm"
-- Specific times: "at 5pm", "11:55am", "16:30"
-
-### Ending session
-Say: "goodbye", "bye", "quit", "stop"
-
-### What we used so far to make these implementations
-- **speech recognition**: OpenAI Whisper(small model: 500MB)
-- **Text to speech**: pyttsx3
-- **Reminder**: APScheduler for scheduling, JSON fopr storage
-- **Time parsing**: Custom natural language parser
-
-
-
-###
-
-The microphone is always on when the program is running
-The audio recordings are temporaly saved and deleted after the transcription
-Offline mode wors without internet connection
 
