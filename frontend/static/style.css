@@ -11,16 +11,46 @@ body {
     margin: 0;
 }
 
+.navbar {
+    position: absolute;
+    top: 15px;
+    right: 15px;
+    background-color: rgba(255, 255, 255, 0.2);
+    padding: 8px 12px;
+    border-radius: 10px;
+    font-size: 14px;
+}
+
+.navbar select {
+    background-color: white;
+    color: #236DDC;
+    border: none;
+    padding: 6px 8px;
+    border-radius: 5px;
+    cursor: pointer;
+    font-weight: bold;
+}
+
 /* Chat area */
 .chat-container {
     width: 80%;
     max-width: 500px;
-    max-height: 400px;
+    height: 60vh;
     display: flex;
     flex-direction: column;
-    justify-content: flex-end;
     overflow-y: auto;
     margin-bottom: 20px;
+    scroll-behavior: smooth;
+}
+
+/* Intro message */
+#botMessage.intro-message {
+    text-align: center;
+    align-self: center;
+    background: none;
+    font-size: 20px;
+    color: #f0f0f0;
+    margin-bottom: 10px;
 }
 
 /* Chat bubbles */
@@ -76,4 +106,66 @@ body {
 @keyframes fadeIn {
     from { opacity: 0; transform: translateY(5px); }
     to { opacity: 1; transform: translateY(0); }
+}
+
+/* Reminders Page */
+.reminder-container {
+    text-align: center;
+    background-color: rgba(255, 255, 255, 0.2);
+    padding: 20px;
+    border-radius: 15px;
+    width: 80%;
+    max-width: 500px;
+    margin-top: 80px;
+}
+
+#reminderForm {
+    display: flex;
+    justify-content: center;
+    flex-wrap: wrap;
+    margin-bottom: 20px;
+}
+
+#reminderForm input, #reminderForm select, #reminderForm button {
+    margin: 5px;
+    padding: 8px;
+    border: none;
+    border-radius: 8px;
+}
+
+#reminderList {
+    list-style: none;
+    padding: 0;
+    margin-top: 15px;
+}
+
+.reminder-item {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    background-color: rgba(0,0,0,0.3);
+    border-radius: 10px;
+    margin: 8px 0;
+    padding: 10px;
+    color: white;
+    font-size: 16px;
+    text-align: left;
+}
+
+.reminder-priority {
+    margin-right: 10px;
+    font-size: 20px;
+}
+
+.delete-btn {
+    background: transparent;
+    border: none;
+    color: #ff6961;
+    font-size: 20px;
+    cursor: pointer;
+    transition: transform 0.2s ease;
+}
+
+.delete-btn:hover {
+    transform: scale(1.2);
 }

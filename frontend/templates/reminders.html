@@ -15,16 +15,23 @@
             <option value="/reminders">Reminders</option>
         </select>
     </div>
-    
-    <!--Main Chat Area-->
-    <div class="chat-container" id="chatContainer">
-        <div class="intro-message" id="botMessage">Ask me anything...</div>
-    </div>
 
-    <!--Mic Button-->
-    <button id="micButton" class="mic-btn large">
-        🎤
-    </button>
+    <!--Reminderss Area-->
+    <div class="reminder-container">
+        <h1>Reminders</h1>
+
+        <form id="reminderForm">
+            <input type="text" id="reminderText" placeholder="Enter reminder..." required>
+            <select id="priority">
+                <option value="low">🟢 Low</option>
+                <option value="medium">🟡 Medium</option>
+                <option value="high">🔴 High</option>
+            </select>
+            <button type="button" id="addReminderBtn">Add</button>
+        </form>
+
+        <ul id="reminderList"></ul>
+    </div>
 
     <script src="{{  url_for('static', filename='script.js') }}"></script>
 </body>
