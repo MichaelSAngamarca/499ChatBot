@@ -44,13 +44,14 @@ def ask():
             response = "Please specify a location."
     elif "time" in user_input or "timezone" in user_input:
         location = extract_location(user_input)
-        if location:
-            response = get_region_info({"location": location})
-            pretty = location.title()
-            response = response.replace(location.lower(), pretty)
-            response = response.replace("2025-", "").replace("T", " ").replace("Z", "")
-        else:
-            response = "Please specify a location."
+        response = get_region_info({"location": location}) if location else "Please specify a location."
+        #if location:
+        #    response = get_region_info({"location": location})
+        #    pretty = location.title()
+        #    response = response.replace(location.lower(), pretty)
+        #    response = response.replace("2025-", "").replace("T", " ").replace("Z", "")
+        #else:
+        #    response = "Please specify a location."
     elif "date" in user_input:
         location = extract_location(user_input)
         response = get_date_info({"location": location})
