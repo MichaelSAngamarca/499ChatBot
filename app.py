@@ -44,14 +44,27 @@ def ask():
             response = "Please specify a location."
     elif "time" in user_input or "timezone" in user_input:
         location = extract_location(user_input)
-        response = get_region_info({"location": location}) if location else "Please specify a location."
-        #if location:
-        #    response = get_region_info({"location": location})
-        #    pretty = location.title()
-        #    response = response.replace(location.lower(), pretty)
-        #    response = response.replace("2025-", "").replace("T", " ").replace("Z", "")
-        #else:
-        #    response = "Please specify a location."
+        if location:
+            response = get_region_info({"location": location})
+            # Capitalize the location properly
+            pretty = location.title()
+            response = response.replace(location.lower(), pretty)
+            # Remove the timezone parentheses, e.g., (America/New_York)
+            response = re.sub(r"\s*\(.*?\)", "", response)
+            # Clean and format the datetime if it's included
+            match = re.search(r"(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2})", response)
+            if match:
+                from datetime import datetime
+                try:
+                    dt = datetime.strptime(match.group(1), "%Y-%m-%dT%H:%M:%S")
+                    formatted_time = dt.strftime("%I:%M %p on %B %d, %Y").lstrip("0")
+                    response = re.sub(r"(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2})", formatted_time, response)
+                except Exception as e:
+                    print("Time parsing error:", e)
+            # Strip out any trailing numbers or decimals at the end
+            response = re.sub(r"[\d\.,]+$", "", response).rstrip(",. ").strip()
+        else:
+            response = "Please specify a location."
     elif "date" in user_input:
         location = extract_location(user_input)
         response = get_date_info({"location": location})
@@ -73,21 +86,23 @@ def speak():
         return jsonify({"error": "No text provided"}), 400
 
     try:
-        # Use ElevenLabs API
-        result = elevenlabs.text_to_speech.convert(
-            voice_id="alloy",
-            model_id="eleven_multilingual_v2",
-            output_format="mp3_44100_128",
+        # ElevenLabs returns a generator that yields audio bytes
+        audio_stream = elevenlabs.text_to_speech.convert(
+            voice_id="2EiwWnXFnvU5JabPnv8n",  # Clyde
+            model_id="eleven_turbo_v2", # good quality + low latency
             text=text
         )
 
-        audio_bytes = result.content
+        # Combine chunks into a single byte object
+        audio_bytes = b"".join(audio_stream)
 
+        # Return audio file response
         return send_file(
             BytesIO(audio_bytes),
             mimetype="audio/mpeg",
             as_attachment=False
         )
+
     except Exception as e:
         print("Error in /speak:", e)
         return jsonify({"error": str(e)}), 500
