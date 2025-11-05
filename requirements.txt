@@ -12,3 +12,5 @@ pyttsx3
 apscheduler
 requests 
 os
+re
+word2number

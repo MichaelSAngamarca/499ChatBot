@@ -18,4 +18,10 @@ You can ask it some questons but as of right now does not do much. To end the co
 NOTE**
 Make sure you have the virtual enviroment activated by running .\venv\Scripts\activate 
 
-
+Basic ChatBot Calculation:
+Trigger Words: calculate, compute, solve, find, equal, equals, what is, what's(may remove equal/equals in the future)
+    : Used to let the bot know that it is asking for math work. Must be the first word in the sentence(NOTE: Prior it would interpret "what is" as a phrase for asking the current time, has been fixed)
+Calcuation words: plus, minus, times, multiplied by, divided by, over, x(might take out): Chatbot looks for the word and replaces with the symbol. 
+Additional calculation words(for more variety and the case of "and"): sum of, product of, difference of, quotient of
+Examples: What is 3 times 3, Calculate 5 plus 4, Compute the quotient of 100 and 20, Solve 13 minus 9. 
+Don't need to ask the Bot to do calculations, simply speak a math question and it will automatically do the problem

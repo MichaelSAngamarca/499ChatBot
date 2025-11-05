@@ -15,6 +15,7 @@ from apscheduler.schedulers.background import BackgroundScheduler
 import json
 import threading
 from time_parser import TimeParser
+from math_parser import MathParser
 
 class OfflineMode:
     def __init__(self):
@@ -25,6 +26,7 @@ class OfflineMode:
         self.tts_volume = 0.9
 
         self.time_parser = TimeParser()
+        self.math_parser = MathParser()
         # initializing the scheduler here
         self.scheduler = BackgroundScheduler()
         self.scheduler.start()
@@ -151,6 +153,15 @@ class OfflineMode:
         if any(word in text_lower for word in ["goodbye", "exit", "quit", "stop", "bye", "see you", "later", "end", "terminate", " end conversation", "okay,thank you"]):
             self.speak("Goodbye! Have a great day!")
             return False
+        # Math or calculation commands
+        if self.math_parser.is_math_expression(text_lower):
+            try:
+                result = self.math_parser.parse_and_calculate(text)
+                self.speak(f"The answer is {result}")
+            except ValueError as e:
+                print(f"Math error: {e}")
+                self.speak("Sorry, I couldn't calculate that.")
+            return True
         # for time queries
         if any (word in text_lower for word in ["time", "what's the time", "current time", "tell me the time", "time now", "what time is it", "can you tell me the time"]):
             current_time = datetime.now().strftime("%I:%M %p")
@@ -176,7 +187,7 @@ class OfflineMode:
         if any(word in text_lower for word in ["clear reminders","delete all reminders", "remove all reminders", "cancel all reminders"]):
             self.clear_all_reminders()
             return True
-       
+        
         #what to say if the command is not recognized
         self.speak("I'm sorry, I can only tell the time, date, set reminders, and list reminders in offline mode.")
         return True
