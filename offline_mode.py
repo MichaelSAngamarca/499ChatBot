@@ -33,7 +33,9 @@ class OfflineMode:
         self.FORMAT = pyaudio.paInt16
         self.CHANNELS = 1
         self.RATE = 16000
-    
+        
+        # control for cooperative shutdown
+        self._stop_event = threading.Event()
 
         # the reminders will be saved in a json file
         self.reminders_file = "reminders.json"
@@ -78,6 +80,11 @@ class OfflineMode:
         min_speech_chunks = int((self.RATE / self.CHUNK) * 0.5)
 
         for i in range(0, int(self.RATE / self.CHUNK * max_duration)):
+            # Check if we should stop (for mode switching)
+            if self._stop_event.is_set():
+                print("\n(stopped - mode switch requested)")
+                break
+                
             data = stream.read(self.CHUNK, exception_on_overflow=False)
             frames.append(data)
             # Checking the volume level
@@ -111,25 +118,24 @@ class OfflineMode:
         # saved audio to a temp file and transcribe it
         if avg_volume < 50:
             return ""
-        temp_file = "temp_audio.wav"
-        wf = wave.open(temp_file, 'wb')
-        wf.setnchannels(self.CHANNELS)
-        wf.setsampwidth(audio.get_sample_size(self.FORMAT))
-        wf.setframerate(self.RATE)
-        wf.writeframes(b''.join(frames))
-        wf.close()
+        
+        # Convert audio frames to numpy array and normalize for Whisper
+        # Whisper expects float32 audio in range [-1, 1]
+        audio_data = b''.join(frames)
+        audio_np = np.frombuffer(audio_data, dtype=np.int16).astype(np.float32)
+        # Normalize to [-1, 1] range
+        audio_np = audio_np / 32768.0
 
+        # Check if we should stop before transcription
+        if self._stop_event.is_set():
+            return ""
+        
         # transcribing the audio using whisper
+        # Pass numpy array directly to avoid ffmpeg dependency
+        # Whisper expects 16kHz mono audio, which matches our recording settings
         print("Transcribing the audio...")
-        result = self.whisper_model.transcribe(temp_file, language="en", fp16=False)
+        result = self.whisper_model.transcribe(audio_np, language="en", fp16=False)
         text = result['text'].strip()
-
-        # Clean up temp file with error handling
-        try:
-            if os.path.exists(temp_file):
-                os.remove(temp_file)
-        except Exception as e:
-            print(f"Warning: Could not delete temp file: {e}")
 
         if text:
             print(f"✓ You said: {text}")
@@ -301,12 +307,15 @@ class OfflineMode:
 
         self.speak("Hello! I am TalkAssist running in offline mode. How can I assist you today?")
 
-        while True:
+        while not self._stop_event.is_set():
             try:
                 user_text = self.listen()
 
                 if not user_text or user_text.strip() == "":
                     #print("No speech detected. Please try again.\n")
+                    # allow quick exit check between listens
+                    if self._stop_event.is_set():
+                        break
                     continue
 
                 should_continue = self.process_command(user_text)
@@ -326,6 +335,10 @@ class OfflineMode:
         print("\nShutting down...")
         self.scheduler.shutdown()
         print("Goodbye!")
+
+    def stop(self):
+        """Request the offline loop to stop and shutdown resources."""
+        self._stop_event.set()
 
 if __name__ == "__main__":
     offline_mode = OfflineMode()
