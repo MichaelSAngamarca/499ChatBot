@@ -31,6 +31,19 @@ class TimeParser:
         text = text.lower().strip()
         text = self._convert_words_to_numbers(text)
         now = datetime.now()
+        daypart_defaults = {"morning": "9 am", "afternoon": "3 pm", "evening": "7 pm", "night": "9 pm"}
+        text = re.sub(r'\btonight\b', 'today night', text)
+        for part, clock in daypart_defaults.items():
+            text = re.sub(rf'\b(tomorrow|today|next\s+\w+)\s+{part}\b', rf'\1 at {clock}', text)
+            text = re.sub(rf'\b(monday|tuesday|wednesday|thursday|friday|saturday|sunday)\s+{part}\b', rf'\1 at {clock}', text)
+        for part, clock in daypart_defaults.items():
+            if not re.search(rf'\b(tomorrow|today|monday|tuesday|wednesday|thursday|friday|saturday|sunday)\s+(at\s+)?\d+\s*(am|pm)', text):
+                text = re.sub(rf'\b{part}\b', f'today at {clock}', text)
+        if 'next week' in text:
+            base = (now + timedelta(days=7)).replace(hour=9, minute=0, second=0, microsecond=0)
+            if (not re.search(r'\b(monday|tuesday|wednesday|thursday|friday|saturday|sunday)\b', text) and not self._extract_time(text)):
+                base = (now + timedelta(days=7)).replace(hour=9, minute=0, second=0, microsecond=0)
+                return base, True, None
 
         # pattern 1 : in X minutes/hours/days
         pattern = r'in (\d+) (minute|minutes|min|mins|hour|hours|hr|hrs|day|days)'
@@ -58,7 +71,7 @@ class TimeParser:
                     return None, False, "Invalid time format"
             else:
                 return base_time.replace(hour=9, minute=0, second=0, microsecond=0), True, None
-        
+
         # pattern 3 : " today at x"
         if 'today' in text:
             time_match = self._extract_time(text)
@@ -70,7 +83,7 @@ class TimeParser:
                     return target_time, True, None
                 except:
                     return None, False, "Invalid time format"
-        # pattern 4 : week days for example "friday", "next monday"
+        # pattern 4 : week days like "friday", "next monday"
         for day_name, day_num in self.days_of_week.items():
             if day_name in text:
                 days_ahead = day_num - now.weekday()
@@ -107,7 +120,7 @@ class TimeParser:
         return None, False, "Could not understand the time. Try formmats like '2 hours', 'tomorrow at 1pm', or 'monday at 1pm'"
 
     def _convert_words_to_numbers(self, text):
-        """Convert word numbers to digits"""
+        # Convert word numbers to digit
         word_to_num = {
             'one': '1', 'two': '2', 'three': '3', 'four': '4', 'five': '5',
             'six': '6', 'seven': '7', 'eight': '8', 'nine': '9', 'ten': '10',
@@ -120,9 +133,7 @@ class TimeParser:
         
         return text
     
-    """
-    get the time form the text, then return datetime.time object or none "4pm", "16:30", "4:30"
-    """
+    # get the time form the text, then return datetime.time object or none "4pm", "16:30", "4:30"
     def _extract_time(self, text):
         # pattern 1: "10:30am" , "10.30 pm" 
         pattern2 = r'(\d{1,2})[:.](\d{2})\s*(am|pm|a\.m\.|p\.m\.)'
@@ -153,6 +164,28 @@ class TimeParser:
                     hour = 0
             if 0 <= hour < 24:
                 return datetime.strptime(f"{hour}:00", "%H:%M").time()
+            
+        pattern_b = r'(\d{1,2})\s+(\d{2})\s*(am|pm|a\.m\.|p\.m\.)'
+        match = re.search(pattern_b, text)
+        if match:
+            hour = int(match.group(1)); minute = int(match.group(2))
+            meridien = match.group(3).lower()
+            if 'pm' in meridien and hour != 12: hour += 12
+            if 'am' in meridien and hour == 12: hour = 0
+            if 0 <= hour < 24 and 0 <= minute < 60:
+                return datetime.strptime(f"{hour}:{minute}", "%H:%M").time()
+            
+        pattern_c = r'\b(\d{3,4})\s*(am|pm|a\.m\.|p\.m\.)\b'
+        match = re.search(pattern_c, text)
+        if match:
+            raw = int(match.group(1)); hour, minute = raw // 100, raw % 100
+            meridien = match.group(2).lower()
+            if 'pm' in meridien and hour != 12: hour += 12
+            if 'am' in meridien and hour == 12: hour = 0
+            if 0 <= hour < 24 and 0 <= minute < 60:
+                return datetime.strptime(f"{hour}:{minute}", "%H:%M").time()
+            
+
         # pattern 3: for 24 hour format: 16:45, 8:00
         pattern3 = r'(\d{1,2})[:.](\d{2})(?!\s*[ap]\.?m\.?)'
         match = re.search(pattern3, text)

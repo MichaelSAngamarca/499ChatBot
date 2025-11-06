@@ -12,3 +12,4 @@ pyttsx3
 apscheduler
 requests 
 os
+pynput
