@@ -13,3 +13,5 @@ apscheduler
 requests 
 os
 pynput
+re
+word2number

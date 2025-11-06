@@ -9,3 +9,5 @@ numpy
 apscheduler
 whisper
 pydoc
+re
+word2number

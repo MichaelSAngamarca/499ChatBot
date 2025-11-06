@@ -15,6 +15,7 @@ import json
 import threading
 from time_parser import TimeParser
 import re
+from math_parser import MathParser
 
 class OfflineMode:
     def __init__(self):
@@ -25,6 +26,7 @@ class OfflineMode:
         self.tts_volume = 0.9
 
         self.time_parser = TimeParser()
+        self.math_parser = MathParser()
         # initializing the scheduler here
         self.scheduler = BackgroundScheduler()
         self.scheduler.start()
@@ -33,6 +35,7 @@ class OfflineMode:
         self.CHANNELS = 1
         self.RATE = 16000
 
+        
         # control for cooperative shutdown
         self._stop_event = threading.Event()
 
@@ -114,6 +117,7 @@ class OfflineMode:
                 print("\n(stopped - mode switch requested)")
                 break
             
+                
             data = stream.read(self.CHUNK, exception_on_overflow=False)
             frames.append(data)
             # Checking the volume level
@@ -186,6 +190,15 @@ class OfflineMode:
             self.speak("Goodbye! Have a great day!")
             return False
         
+        # Math or calculation commands
+        if self.math_parser.is_math_expression(text_lower):
+            try:
+                result = self.math_parser.parse_and_calculate(text)
+                self.speak(f"The answer is {result}")
+            except ValueError as e:
+                print(f"Math error: {e}")
+                self.speak("Sorry, I couldn't calculate that.")
+            return True
         # for time queries
         if any (word in text_lower for word in ["time", "what's the time", "current time", "tell me the time", "time now", "what time is it", "can you tell me the time"]):
             current_time = datetime.now().strftime("%I:%M %p")
@@ -596,8 +609,8 @@ class OfflineMode:
         print("Goodbye!")
 
     def stop(self):
-            """Request the offline loop to stop and shutdown resources."""
-            self._stop_event.set()
+        """Request the offline loop to stop and shutdown resources."""
+        self._stop_event.set()
 
 if __name__ == "__main__":
     offline_mode = OfflineMode()
