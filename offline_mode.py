@@ -579,13 +579,13 @@ class OfflineMode:
 
         self.speak("Hello! I am TalkAssist running in offline mode. How can I assist you today?")
 
+        conversation_ended_naturally = False
+        
         while not self._stop_event.is_set():
             try:
                 user_text = self.listen()
 
                 if not user_text or user_text.strip() == "":
-                    #print("No speech detected. Please try again.\n")
-                    # allow quick exit check between listens
                     if self._stop_event.is_set():
                         break
                     continue
@@ -593,6 +593,7 @@ class OfflineMode:
                 should_continue = self.process_command(user_text)
 
                 if not should_continue:
+                    conversation_ended_naturally = True
                     break
             except KeyboardInterrupt:
                 print("\n\nInterrupted by the user (Ctrl+C)")
@@ -604,13 +605,17 @@ class OfflineMode:
                 traceback.print_exc()
                 self.speak("Sorry, I encountered an error. Please try again.")
 
-        print("\nShutting down...")
-        self.scheduler.shutdown()
-        print("Goodbye!")
+        if conversation_ended_naturally:
+            print("\nConversation ended. Returning to wake word detection...")
+        else:
+            print("\nShutting down...")
+            self.scheduler.shutdown()
+            print("Goodbye!")
 
     def stop(self):
         """Request the offline loop to stop and shutdown resources."""
         self._stop_event.set()
+        self.scheduler.shutdown()
 
 if __name__ == "__main__":
     offline_mode = OfflineMode()

@@ -2,6 +2,8 @@ import os
 import signal
 import threading
 import time
+import argparse
+import pyttsx3
 from dotenv import load_dotenv
 from elevenlabs.client import ElevenLabs
 from elevenlabs.conversational_ai.conversation import Conversation
@@ -11,6 +13,19 @@ from tools import client_tools
 from connectivity_checker import check_internet_connectivity, safe_api_call
 from offline_mode import OfflineMode
 from wake_word_detector import WakeWordDetector
+from hotkey_handler import HotkeyHandler
+
+def speak(text, rate=150, volume=0.9):
+    """Speak text using text-to-speech."""
+    try:
+        engine = pyttsx3.init()
+        engine.setProperty('rate', rate)
+        engine.setProperty('volume', volume)
+        engine.say(text)
+        engine.runAndWait()
+        engine.stop()
+    except Exception as e:
+        print(f"TTS Error: {e}")
 
 def initialize_online_mode():
     load_dotenv()
@@ -45,17 +60,21 @@ offline_mode_instance = None
 mode_thread = None
 stop_monitoring = threading.Event()
 mode_lock = threading.RLock()  # Reentrant lock to allow nested locking
+conversation_ended_event = threading.Event()  # Signal when conversation ends naturally
+should_exit_program = False  # Flag to exit the entire program
 
 def run_online_mode_thread(conversation):
     """Run online mode in a separate thread."""
-    global current_mode, online_conversation
+    global current_mode, online_conversation, conversation_ended_event
     try:
         print("Starting online conversation session...")
         conversation.start_session()
         conversation_id = conversation.wait_for_session_end()
-        print(f"Online conversation ended. Conversation ID: {conversation_id}")
+        print(f"\nOnline conversation ended. Conversation ID: {conversation_id}")
+        conversation_ended_event.set()
     except Exception as e:
         print(f"Error during online conversation: {e}")
+        conversation_ended_event.set()
     finally:
         with mode_lock:
             if current_mode == 'online':
@@ -64,11 +83,13 @@ def run_online_mode_thread(conversation):
 
 def run_offline_mode_thread():
     """Run offline mode in a separate thread."""
-    global current_mode, offline_mode_instance
+    global current_mode, offline_mode_instance, conversation_ended_event
     try:
         offline_mode_instance.run()
+        conversation_ended_event.set()
     except Exception as e:
         print(f"Error during offline mode: {e}")
+        conversation_ended_event.set()
     finally:
         with mode_lock:
             if current_mode == 'offline':
@@ -160,20 +181,22 @@ def start_offline_mode():
 
 def monitor_connectivity():
     """Monitor connectivity and switch modes as needed."""
-    global current_mode
+    global current_mode, conversation_ended_event, should_exit_program, mode_thread
     last_connectivity = None
     
-    while not stop_monitoring.is_set():
+    while not stop_monitoring.is_set() and not should_exit_program:
         try:
             is_connected = check_internet_connectivity()
             
             if last_connectivity is not None and is_connected != last_connectivity:
                 if is_connected:
                     print("\n✓ Internet connection detected!")
-                    start_online_mode()
+                    if current_mode is None:
+                        start_online_mode()
                 else:
                     print("\n✗ Internet connection lost!")
-                    start_offline_mode()
+                    if current_mode is None:
+                        start_offline_mode()
             
             elif last_connectivity is None:
                 if is_connected:
@@ -185,60 +208,142 @@ def monitor_connectivity():
             
             last_connectivity = is_connected
             
-            stop_monitoring.wait(5)
+            if conversation_ended_event.wait(timeout=5):
+                conversation_ended_event.clear()
+                if mode_thread and mode_thread.is_alive():
+                    mode_thread.join(timeout=2)
+                break
             
         except Exception as e:
             print(f"Error in connectivity monitoring: {e}")
             time.sleep(5)
 
-def main():
-    global stop_monitoring
+def start_main_application(blocking=True, on_stop_callback=None):
+    global stop_monitoring, conversation_ended_event, should_exit_program
+    
+    print("\n" + "="*60)
+    print("Starting TalkAssist...")
+    print("Monitoring connectivity and managing mode switching...")
+    print("="*60 + "\n")
+    
+    stop_monitoring.clear()
+    conversation_ended_event.clear()
+    should_exit_program = False
+    
+    def monitor_with_callback():
+        try:
+            monitor_connectivity()
+        finally:
+            if on_stop_callback:
+                on_stop_callback()
+    
+    monitor_thread = threading.Thread(target=monitor_with_callback, daemon=not blocking)
+    monitor_thread.start()
+    
+    if blocking:
+        try:
+            monitor_thread.join()
+        except KeyboardInterrupt:
+            print("\n\nShutting down...")
+            should_exit_program = True
+            stop_monitoring.set()
+            stop_current_mode()
+            if on_stop_callback:
+                on_stop_callback()
+            print("Shutdown complete. Goodbye!")
+    else:
+        return monitor_thread
+
+def wait_for_wake_word_and_start():
+    """Wait for wake word, then start the application. Returns True if should continue looping."""
+    global should_exit_program
+    
+    print("="*60)
+    print("Waiting for wake word activation...")
+    print("Say 'hey talk assist' to start a conversation")
+    print("Press Ctrl+C to exit the program")
+    print("="*60 + "\n")
+    
+    speak("Say hey talk assist to start a conversation!")
+    
+    wake_detector = WakeWordDetector(wake_phrase="hey talk assist", model_size="base")
+    
+    try:
+        wake_detected = wake_detector.wait_for_wake_word(verbose=True)
+        
+        if not wake_detected or should_exit_program:
+            wake_detector.stop()
+            return False
+        
+        wake_detector.stop()
+        del wake_detector
+        
+        print("\n" + "="*60)
+        print("Wake word detected! Starting TalkAssist...")
+        print("="*60 + "\n")
+        
+        start_main_application()
+        
+        print("\n" + "="*60)
+        print("Conversation ended. Returning to wake word detection...")
+        print("="*60 + "\n")
+        
+        return True
+        
+    except KeyboardInterrupt:
+        print("\n\nShutting down...")
+        wake_detector.stop()
+        should_exit_program = True
+        return False
+    except Exception as e:
+        print(f"Error: {e}")
+        wake_detector.stop()
+        return True
+
+def main(hotkey='ctrl+shift+a', skip_wake_word=False):
+    global stop_monitoring, should_exit_program
     
     print("="*60)
     print("TalkAssist - Starting Application")
     print("="*60)
-    print("Waiting for wake word activation...")
+    print("Starting hotkey listener...")
+    print(f"Press [{hotkey.upper()}] to activate TalkAssist")
+    print("Press Ctrl+C to exit")
     print("="*60 + "\n")
     
-    # Initialize wake word detector
-    wake_detector = WakeWordDetector(wake_phrase="hey talk assist", model_size="base")
+    handler = HotkeyHandler(hotkey=hotkey)
     
-    # Wait for wake word before starting main functionality
-    try:
-        wake_detected = wake_detector.wait_for_wake_word(verbose=True)
-        
-        if not wake_detected:
-            print("Wake word detection stopped. Exiting...")
-            return
-        
-        print("\n" + "="*60)
-        print("Wake word detected! Starting TalkAssist...")
-        print("Monitoring connectivity and managing mode switching...")
-        print("="*60 + "\n")
-        
-        # Clean up wake detector
-        wake_detector.stop()
-        del wake_detector
-        
-    except KeyboardInterrupt:
-        print("\n\nShutting down before activation...")
-        wake_detector.stop()
-        return
+    def on_hotkey_triggered():
+        try:
+            if skip_wake_word:
+                start_main_application(blocking=True)
+                return
+            
+            keep_listening = True
+            while keep_listening and not should_exit_program:
+                keep_listening = wait_for_wake_word_and_start()
+        except Exception as e:
+            print(f"Error while handling wake word workflow: {e}")
+        finally:
+            handler.reset_running_state()
     
-    # Start connectivity monitoring in a separate thread
-    monitor_thread = threading.Thread(target=monitor_connectivity, daemon=False)
-    monitor_thread.start()
+    handler.set_callback(on_hotkey_triggered)
     
     try:
-        monitor_thread.join()
+        handler.start_listening()
     except KeyboardInterrupt:
-        print("\n\nShutting down...")
-        stop_monitoring.set()
-        stop_current_mode()
-        print("Shutdown complete. Goodbye!")
+        handler.stop()
+        print("\nShutdown complete. Goodbye!")
 
 if __name__ == "__main__":
-    # Handle Ctrl+C gracefully
+    parser = argparse.ArgumentParser(description='TalkAssist - Voice Assistant with Hotkey Support')
+    parser.add_argument('--hotkey-combo', type=str, default='ctrl+shift+a', 
+                       help='Hotkey combination (default: ctrl+shift+a)')
+    parser.add_argument('--skip-wake-word', action='store_true', 
+                       help='Skip wake word detection and start directly')
+    
+    args = parser.parse_args()
+    
     def signal_handler(sig, frame):
         print("\n\nReceived interrupt signal...")
         global stop_monitoring
@@ -247,4 +352,4 @@ if __name__ == "__main__":
         exit(0)
     
     signal.signal(signal.SIGINT, signal_handler)
-    main()
+    main(hotkey=args.hotkey_combo, skip_wake_word=args.skip_wake_word)
