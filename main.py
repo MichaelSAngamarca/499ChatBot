@@ -10,6 +10,7 @@ from elevenlabs.conversational_ai.conversation import Conversation, ClientTools
 from tools import client_tools
 from connectivity_checker import check_internet_connectivity, safe_api_call
 from offline_mode import OfflineMode
+from wake_word_detector import WakeWordDetector
 
 def initialize_online_mode():
     load_dotenv()
@@ -196,8 +197,33 @@ def main():
     print("="*60)
     print("TalkAssist - Starting Application")
     print("="*60)
-    print("Monitoring connectivity and managing mode switching...")
+    print("Waiting for wake word activation...")
     print("="*60 + "\n")
+    
+    # Initialize wake word detector
+    wake_detector = WakeWordDetector(wake_phrase="hey talk assist", model_size="base")
+    
+    # Wait for wake word before starting main functionality
+    try:
+        wake_detected = wake_detector.wait_for_wake_word(verbose=True)
+        
+        if not wake_detected:
+            print("Wake word detection stopped. Exiting...")
+            return
+        
+        print("\n" + "="*60)
+        print("Wake word detected! Starting TalkAssist...")
+        print("Monitoring connectivity and managing mode switching...")
+        print("="*60 + "\n")
+        
+        # Clean up wake detector
+        wake_detector.stop()
+        del wake_detector
+        
+    except KeyboardInterrupt:
+        print("\n\nShutting down before activation...")
+        wake_detector.stop()
+        return
     
     # Start connectivity monitoring in a separate thread
     monitor_thread = threading.Thread(target=monitor_connectivity, daemon=False)
