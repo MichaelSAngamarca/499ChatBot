@@ -31,6 +31,20 @@ body {
     font-weight: bold;
 }
 
+#statusBadge {
+  display: inline-block;
+  margin-left: 12px;
+  padding: 6px 10px;
+  border-radius: 12px;
+  font-size: 13px;
+  font-weight: 600;
+  color: white;
+  background: #777;
+}
+#statusBadge.online { background: #28a745; }
+#statusBadge.offline { background: #dc3545; }
+#statusBadge.degraded { background: #f0ad4e; }
+
 /* Chat area */
 .chat-container {
     width: 80%;
