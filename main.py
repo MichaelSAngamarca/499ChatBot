@@ -14,9 +14,17 @@ from connectivity_checker import check_internet_connectivity, safe_api_call
 from offline_mode import OfflineMode
 from wake_word_detector import WakeWordDetector
 from hotkey_handler import HotkeyHandler
+#from app import app
+from werkzeug.serving import make_server
 
+# Shared speech function
 def speak(text, rate=150, volume=0.9):
     """Speak text using text-to-speech."""
+    if not text or text.strip() == "":
+        return
+    if text.lower().startswith(("error processing message", "sorry, the bot", "tts error")):
+        print(f"(Skipping TTS for internal message: {text})")
+        return
     try:
         engine = pyttsx3.init()
         engine.setProperty('rate', rate)
@@ -27,6 +35,7 @@ def speak(text, rate=150, volume=0.9):
     except Exception as e:
         print(f"TTS Error: {e}")
 
+# Online mode initialization
 def initialize_online_mode():
     load_dotenv()
     agent_id = os.getenv("AGENT_ID")
@@ -52,7 +61,7 @@ def initialize_online_mode():
     except Exception as e:
         print(f"Error initializing online mode: {e}")
         return None
-
+    
 # Global variables for mode management
 current_mode = None  # 'online' or 'offline'
 online_conversation = None
@@ -61,8 +70,55 @@ mode_thread = None
 stop_monitoring = threading.Event()
 mode_lock = threading.RLock()  # Reentrant lock to allow nested locking
 conversation_ended_event = threading.Event()  # Signal when conversation ends naturally
-should_exit_program = False  # Flag to exit the entire program
+should_exit_program = False  # Flag to exit the entire program    
+flask_thread = None 
+flask_server = None
 
+# Helper functions for Flask
+def get_or_create_conversation():
+    """Ensure we have a valid online conversation object."""
+    global online_conversation
+    if online_conversation is None:
+        online_conversation = initialize_online_mode()
+    
+    if online_conversation:
+        try:
+            if not getattr(online_conversation, "_ws", None) or not online_conversation._ws.connected:
+                print("Starting or reconnecting conversation session...")
+                try:
+                    online_conversation.start_session()
+                    # Wait up to 5s for connection
+                    for _ in range(50):
+                        if getattr(online_conversation, "_ws", None) and online_conversation._ws.connected:
+                            break
+                        time.sleep(0.1)
+                    else:
+                        raise RuntimeError("Conversation websocket failed to connect.")
+                except Exception as e:
+                    print(f"Error starting conversation session: {e}")
+                    online_conversation = None
+                    return None
+            
+        except Exception as e:
+            print(f"Error starting session: {e}")
+            online_conversation = None
+    
+    return online_conversation
+
+def handle_user_message(message):
+    conversation = get_or_create_conversation()
+    if conversation is None:
+        return "Sorry, the bot is currently offline or could not initialize."
+    
+    try:
+        response = conversation.send_user_message(message)
+        return response or "Sorry, no response received."
+    except RuntimeError as e:
+        if "websocket failed to connect" in str(e):
+            return "Sorry, the bot session is not ready yet."
+        return f"Error processing message: {e}"
+
+# Mode control
 def run_online_mode_thread(conversation):
     """Run online mode in a separate thread."""
     global current_mode, online_conversation, conversation_ended_event
@@ -218,6 +274,27 @@ def monitor_connectivity():
             print(f"Error in connectivity monitoring: {e}")
             time.sleep(5)
 
+# Start Flask
+def start_flask_server(host="0.0.0.0", port=5001):
+    from app import app
+    global flask_server, flask_thread
+    server = make_server(host, port, app)
+    flask_server = server
+
+    def serve():
+        print(f"Flask server started at http://localhost:{port}")
+        try:
+            server.serve_forever()
+        except KeyboardInterrupt:
+            pass
+        except Exception as e:
+            print(f"Flask serve loop exited: {e}")
+
+    t = threading.Thread(target=serve)
+    t.start()
+    flask_thread = t
+    return server, t
+
 def start_main_application(blocking=True, on_stop_callback=None):
     global stop_monitoring, conversation_ended_event, should_exit_program
     
@@ -229,6 +306,8 @@ def start_main_application(blocking=True, on_stop_callback=None):
     stop_monitoring.clear()
     conversation_ended_event.clear()
     should_exit_program = False
+
+    server, thread = start_flask_server()
     
     def monitor_with_callback():
         try:
@@ -244,15 +323,10 @@ def start_main_application(blocking=True, on_stop_callback=None):
         try:
             monitor_thread.join()
         except KeyboardInterrupt:
-            print("\n\nShutting down...")
-            should_exit_program = True
-            stop_monitoring.set()
-            stop_current_mode()
-            if on_stop_callback:
-                on_stop_callback()
-            print("Shutdown complete. Goodbye!")
+            # rely on signal handler
+            pass
     else:
-        return monitor_thread
+        return monitor_thread, thread
 
 def wait_for_wake_word_and_start():
     """Wait for wake word, then start the application. Returns True if should continue looping."""
@@ -306,6 +380,12 @@ def main(hotkey='ctrl+shift+a', skip_wake_word=False):
     print("="*60)
     print("TalkAssist - Starting Application")
     print("="*60)
+
+    if skip_wake_word:
+        # Directly start the app without hotkey
+        start_main_application(blocking=True)
+        return
+
     print("Starting hotkey listener...")
     print(f"Press [{hotkey.upper()}] to activate TalkAssist")
     print("Press Ctrl+C to exit")
@@ -346,10 +426,21 @@ if __name__ == "__main__":
     
     def signal_handler(sig, frame):
         print("\n\nReceived interrupt signal...")
-        global stop_monitoring
+        global stop_monitoring, should_exit_program, flask_server, flask_thread
         stop_monitoring.set()
+        should_exit_program = True
         stop_current_mode()
-        exit(0)
+        if flask_server:
+            print("Shutting down Flask server...")
+            try:
+                flask_server.shutdown()
+                flask_server.server_close()
+            except Exception as e:
+                print(f"Error shutting down Flask server: {e}")
+        if flask_thread and flask_thread.is_alive():
+            flask_thread.join(timeout=5)
+        print("Shutdown complete. Goodbye!")
+        os._exit(0)
     
     signal.signal(signal.SIGINT, signal_handler)
     main(hotkey=args.hotkey_combo, skip_wake_word=args.skip_wake_word)
