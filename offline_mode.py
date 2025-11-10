@@ -192,13 +192,17 @@ class OfflineMode:
         
         # Math or calculation commands
         if self.math_parser.is_math_expression(text_lower):
-            try:
-                result = self.math_parser.parse_and_calculate(text)
-                self.speak(f"The answer is {result}")
-            except ValueError as e:
-                print(f"Math error: {e}")
-                self.speak("Sorry, I couldn't calculate that.")
-            return True
+            time_date_keywords = ["time", "date", "day", "today", "tomorrow", "when"]
+            is_time_question = any(keyword in text_lower for keyword in time_date_keywords)
+            if not is_time_question:
+                try:
+                    result = self.math_parser.parse_and_calculate(text)
+                    self.speak(f"The answer is {result}")
+                except ValueError as e:
+                    print(f"Math error: {e}")
+                    self.speak("Sorry, I couldn't calculate that.")
+                return True
+            
         # for time queries
         if any (word in text_lower for word in ["time", "what's the time", "current time", "tell me the time", "time now", "what time is it", "can you tell me the time"]):
             current_time = datetime.now().strftime("%I:%M %p")
