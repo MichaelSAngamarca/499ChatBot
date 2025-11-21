@@ -51,7 +51,7 @@ def initialize_online_mode():
             elevenlabs,
             agent_id,
             client_tools=client_tools,
-            requires_auth=bool(api_key),
+            requires_auth=bool(api_key),.\main.
             audio_interface=DefaultAudioInterface(),
             callback_agent_response=lambda response: print(f"TalkAssist: {response}"),
             callback_agent_response_correction=lambda original, corrected: print(f"TalkAssist: {original} -> {corrected}"),
@@ -134,15 +134,20 @@ def run_online_mode_thread(conversation):
                 conversation_ended_event.set()
     except Exception as e:
         print(f"Error during online conversation: {e}")
+        import traceback
+        traceback.print_exc()
         # Only set event if we're still in online mode AND not switching modes
         with mode_lock:
             if current_mode == 'online' and not switching_modes.is_set():
                 conversation_ended_event.set()
     finally:
+        # Only clean up if we're still the active conversation (not already switched)
         with mode_lock:
-            if current_mode == 'online':
-                current_mode = None
-                online_conversation = None
+            # Only clear if this conversation is still the active one
+            if online_conversation is conversation:
+                if current_mode == 'online':
+                    current_mode = None
+                    online_conversation = None
 
 def run_offline_mode_thread():
     """Run offline mode in a separate thread."""
@@ -176,27 +181,123 @@ def stop_current_mode():
         if current_mode == 'online' and online_conversation:
             try:
                 print("Stopping online mode...")
-                online_conversation.end_session()
-                if mode_thread and mode_thread.is_alive():
-                    mode_thread.join(timeout=3)  # Increased timeout
+                # Store reference before clearing
+                conv_to_stop = online_conversation
+                thread_to_join = mode_thread
+                
+                # Clear global reference first to prevent race conditions
                 online_conversation = None
                 current_mode = None
+                
+                # Now safely end the session with comprehensive error handling
+                try:
+                    # Try to stop audio interface first to prevent stream errors
+                    if hasattr(conv_to_stop, 'audio_interface') and conv_to_stop.audio_interface:
+                        try:
+                            # Check if stream is open before stopping
+                            if hasattr(conv_to_stop.audio_interface, 'in_stream'):
+                                stream = conv_to_stop.audio_interface.in_stream
+                                if stream and hasattr(stream, '_stream') and stream._stream:
+                                    try:
+                                        # Check if stream is active before stopping
+                                        import pyaudio
+                                        if stream._stream.is_active():
+                                            stream.stop_stream()
+                                    except (OSError, AttributeError) as e:
+                                        # Stream already closed or not open - this is fine
+                                        pass
+                        except Exception as e:
+                            # Audio interface cleanup errors are expected during mode switch
+                            pass
+                    
+                    # Try to end session, but suppress expected errors
+                    try:
+                        conv_to_stop.end_session()
+                    except Exception as e:
+                        # Suppress expected errors during cleanup (websocket/SSL/audio stream errors)
+                        error_str = str(e)
+                        error_type = type(e).__name__
+                        # These errors are expected when switching modes - suppress them
+                        expected_errors = [
+                            'ConnectionClosed',
+                            'SSLEOF',
+                            'Stream not open',
+                            'sent 1000',
+                            'no close frame',
+                            'EOF occurred',
+                            'violation of protocol'
+                        ]
+                        if not any(err in error_type or err in error_str for err in expected_errors):
+                            # Only log unexpected errors
+                            print(f"Warning: Error ending session: {error_type}")
+                except Exception as e:
+                    # Catch any errors in the cleanup block itself
+                    pass
+                
+                # Wait for thread to finish (with shorter timeout since we're suppressing errors)
+                if thread_to_join and thread_to_join.is_alive():
+                    thread_to_join.join(timeout=2)  # Reduced timeout since we're handling errors
+                    if thread_to_join.is_alive():
+                        # Thread didn't finish, but that's okay - we've cleaned up what we can
+                        pass
+                
+                # Additional cleanup - ensure websocket is closed (suppress errors)
+                try:
+                    if hasattr(conv_to_stop, '_ws') and conv_to_stop._ws:
+                        # Check if websocket is still connected before trying to close
+                        try:
+                            if hasattr(conv_to_stop._ws, 'connected') and conv_to_stop._ws.connected:
+                                if hasattr(conv_to_stop._ws, 'close'):
+                                    conv_to_stop._ws.close()
+                        except (ConnectionError, AttributeError):
+                            # Already closed or closing - this is fine
+                            pass
+                except Exception:
+                    # Websocket cleanup errors are expected - suppress
+                    pass
+                
+                # Clear the reference
+                try:
+                    del conv_to_stop
+                except:
+                    pass
                 print("Online mode stopped.")
             except Exception as e:
-                print(f"Error stopping online mode: {e}")
+                # Final catch-all - ensure we always clean up state
+                error_type = type(e).__name__
+                if 'ConnectionClosed' not in error_type and 'SSLEOF' not in error_type:
+                    print(f"Error stopping online mode: {error_type}")
+                # Ensure cleanup even on error
+                online_conversation = None
                 current_mode = None
         
         elif current_mode == 'offline' and offline_mode_instance:
             try:
                 print("Stopping offline mode...")
-                offline_mode_instance.stop()
-                if mode_thread and mode_thread.is_alive():
-                    mode_thread.join(timeout=3)  # Increased timeout
+                # Store reference before clearing
+                offline_to_stop = offline_mode_instance
+                thread_to_join = mode_thread
+                
+                # Clear global reference first
                 offline_mode_instance = None
                 current_mode = None
+                
+                # Now safely stop offline mode
+                offline_to_stop.stop()
+                
+                # Wait for thread to finish
+                if thread_to_join and thread_to_join.is_alive():
+                    thread_to_join.join(timeout=5)  # Increased timeout
+                    if thread_to_join.is_alive():
+                        print("Warning: Offline mode thread did not finish in time")
+                
                 print("Offline mode stopped.")
             except Exception as e:
                 print(f"Error stopping offline mode: {e}")
+                import traceback
+                traceback.print_exc()
+                # Ensure cleanup even on error
+                offline_mode_instance = None
                 current_mode = None
 
 def start_online_mode():
@@ -208,10 +309,42 @@ def start_online_mode():
             switching_modes.clear()  # Clear flag if already in online mode
             return  # Already running
         
-        # Stop offline mode if running
+        # Stop any existing mode first
         if current_mode == 'offline':
             stop_current_mode()  # RLock allows nested locking
             time.sleep(0.5)  # Brief pause for cleanup
+        elif current_mode == 'online':
+            # This shouldn't happen, but clean up just in case
+            stop_current_mode()
+            time.sleep(0.5)
+        
+        # Ensure any lingering conversation object is cleaned up
+        if online_conversation is not None:
+            try:
+                print("Cleaning up lingering conversation object...")
+                if hasattr(online_conversation, 'end_session'):
+                    try:
+                        online_conversation.end_session()
+                    except:
+                        pass
+                if hasattr(online_conversation, '_ws') and online_conversation._ws:
+                    try:
+                        if hasattr(online_conversation._ws, 'close'):
+                            online_conversation._ws.close()
+                    except:
+                        pass
+            except Exception as e:
+                print(f"Warning: Error cleaning up lingering conversation: {e}")
+            finally:
+                online_conversation = None
+        
+        # Ensure mode thread is fully stopped
+        if mode_thread and mode_thread.is_alive():
+            print("Waiting for previous mode thread to finish...")
+            mode_thread.join(timeout=2)
+        
+        # Additional cleanup pause
+        time.sleep(0.3)
         
         print("\n" + "="*60)
         print("Switching to ONLINE mode")
@@ -248,9 +381,32 @@ def start_offline_mode():
             switching_modes.clear()  # Clear flag if already in offline mode
             return  
         
+        # Stop any existing mode first
         if current_mode == 'online':
             stop_current_mode() 
             time.sleep(0.5)  
+        elif current_mode == 'offline':
+            # This shouldn't happen, but clean up just in case
+            stop_current_mode()
+            time.sleep(0.5)
+        
+        # Ensure any lingering offline mode instance is cleaned up
+        if offline_mode_instance is not None:
+            try:
+                print("Cleaning up lingering offline mode instance...")
+                offline_mode_instance.stop()
+            except Exception as e:
+                print(f"Warning: Error cleaning up lingering offline instance: {e}")
+            finally:
+                offline_mode_instance = None
+        
+        # Ensure mode thread is fully stopped
+        if mode_thread and mode_thread.is_alive():
+            print("Waiting for previous mode thread to finish...")
+            mode_thread.join(timeout=2)
+        
+        # Additional cleanup pause
+        time.sleep(0.3)
         
         print("\n" + "="*60)
         print("Switching to OFFLINE mode")
@@ -383,9 +539,13 @@ def start_main_application(blocking=True, on_stop_callback=None):
     else:
         return monitor_thread, thread
 
+# Track if we've already spoken the initial message for the current hotkey press
+_initial_message_spoken = False
+_last_message_time = 0
+
 def wait_for_wake_word_and_start():
     """Wait for wake word, then start the application. Returns True if should continue looping."""
-    global should_exit_program
+    global should_exit_program, _initial_message_spoken, _last_message_time
     
     print("="*60)
     print("Waiting for wake word activation...")
@@ -393,7 +553,13 @@ def wait_for_wake_word_and_start():
     print("Press Ctrl+C to exit the program")
     print("="*60 + "\n")
     
-    speak("Say hey talk assist to start a conversation!")
+    # Only speak the message the first time (when hotkey is first pressed)
+    # Not when returning from a conversation, and not if we just spoke it recently
+    current_time = time.time()
+    if not _initial_message_spoken and (current_time - _last_message_time) > 2.0:
+        speak("Say hey talk assist to start a conversation!")
+        _initial_message_spoken = True
+        _last_message_time = current_time
     
     wake_detector = WakeWordDetector(wake_phrase="hey talk assist", model_size="base")
     
@@ -449,18 +615,30 @@ def main(hotkey='ctrl+shift+a', skip_wake_word=False):
     handler = HotkeyHandler(hotkey=hotkey)
     
     def on_hotkey_triggered():
+        global _initial_message_spoken, _last_message_time
         try:
             if skip_wake_word:
                 start_main_application(blocking=True)
                 return
             
+            # Reset the flag when hotkey is pressed (new session)
+            _initial_message_spoken = False
+            _last_message_time = 0  # Reset time as well
+            
             keep_listening = True
             while keep_listening and not should_exit_program:
                 keep_listening = wait_for_wake_word_and_start()
+                # After returning from a conversation, reset the flag so we don't speak again
+                # unless the user presses the hotkey again
+                if not keep_listening:
+                    _initial_message_spoken = False
         except Exception as e:
             print(f"Error while handling wake word workflow: {e}")
         finally:
             handler.reset_running_state()
+            # Reset flag when done
+            _initial_message_spoken = False
+            _last_message_time = 0
     
     handler.set_callback(on_hotkey_triggered)
     
