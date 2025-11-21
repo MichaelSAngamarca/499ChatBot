@@ -14,6 +14,7 @@ from connectivity_checker import check_internet_connectivity, safe_api_call
 from offline_mode import OfflineMode
 from wake_word_detector import WakeWordDetector
 from hotkey_handler import HotkeyHandler
+from apscheduler.schedulers.background import BackgroundScheduler
 #from app import app
 from werkzeug.serving import make_server
 
@@ -51,7 +52,7 @@ def initialize_online_mode():
             elevenlabs,
             agent_id,
             client_tools=client_tools,
-            requires_auth=bool(api_key),.\main.
+            requires_auth=bool(api_key),
             audio_interface=DefaultAudioInterface(),
             callback_agent_response=lambda response: print(f"TalkAssist: {response}"),
             callback_agent_response_correction=lambda original, corrected: print(f"TalkAssist: {original} -> {corrected}"),
@@ -74,6 +75,56 @@ should_exit_program = False  # Flag to exit the entire program
 flask_thread = None 
 flask_server = None
 switching_modes = threading.Event()  # Flag to indicate we're in the middle of switching modes
+
+# Initialize reminder scheduler and load existing reminders
+reminder_scheduler = BackgroundScheduler()
+reminder_scheduler.start()
+
+# Load existing reminders into scheduler
+def load_existing_reminders():
+    """Load existing reminders from JSON and schedule them."""
+    import json
+    import os
+    from datetime import datetime
+    
+    reminders_file = "reminders.json"
+    if os.path.exists(reminders_file):
+        try:
+            with open(reminders_file, 'r') as f:
+                reminders = json.load(f)
+            
+            def trigger_reminder(reminder_id, reminder_text):
+                speak(f"Reminder: {reminder_text}")
+                # Mark as inactive
+                if os.path.exists(reminders_file):
+                    with open(reminders_file, 'r') as f:
+                        reminders = json.load(f)
+                    for r in reminders:
+                        if r['id'] == reminder_id:
+                            r['active'] = False
+                    with open(reminders_file, 'w') as f:
+                        json.dump(reminders, f, indent=4)
+            
+            now = datetime.now()
+            for reminder in reminders:
+                if reminder.get("active", True):
+                    reminder_time = datetime.fromisoformat(reminder['time'])
+                    if reminder_time > now:
+                        job_id = f"reminder_{reminder['id']}"
+                        try:
+                            reminder_scheduler.add_job(
+                                trigger_reminder,
+                                'date',
+                                run_date=reminder_time,
+                                args=[reminder['id'], reminder['text']],
+                                id=job_id
+                            )
+                        except Exception as e:
+                            print(f"Error scheduling reminder {reminder['id']}: {e}")
+        except Exception as e:
+            print(f"Error loading reminders: {e}")
+
+load_existing_reminders()
 
 # Helper functions for Flask
 def get_or_create_conversation():
@@ -130,7 +181,11 @@ def run_online_mode_thread(conversation):
         print(f"\nOnline conversation ended. Conversation ID: {conversation_id}")
         # Only set event if we're still in online mode AND not switching modes
         with mode_lock:
-            if current_mode == 'online' and not switching_modes.is_set():
+            # Only clear if this conversation is still the active one
+            if online_conversation is conversation and current_mode == 'online' and not switching_modes.is_set():
+                # Set mode to None BEFORE setting the event so monitor_connectivity() can properly detect the end
+                current_mode = None
+                online_conversation = None
                 conversation_ended_event.set()
     except Exception as e:
         print(f"Error during online conversation: {e}")
@@ -138,12 +193,16 @@ def run_online_mode_thread(conversation):
         traceback.print_exc()
         # Only set event if we're still in online mode AND not switching modes
         with mode_lock:
-            if current_mode == 'online' and not switching_modes.is_set():
+            # Only clear if this conversation is still the active one
+            if online_conversation is conversation and current_mode == 'online' and not switching_modes.is_set():
+                # Set mode to None BEFORE setting the event so monitor_connectivity() can properly detect the end
+                current_mode = None
+                online_conversation = None
                 conversation_ended_event.set()
     finally:
         # Only clean up if we're still the active conversation (not already switched)
         with mode_lock:
-            # Only clear if this conversation is still the active one
+            # Only clear if this conversation is still the active one and not already cleaned up
             if online_conversation is conversation:
                 if current_mode == 'online':
                     current_mode = None
@@ -157,15 +216,22 @@ def run_offline_mode_thread():
         # Only set event if we're still in offline mode AND not switching modes
         with mode_lock:
             if current_mode == 'offline' and not switching_modes.is_set():
+                # Set mode to None BEFORE setting the event so monitor_connectivity() can properly detect the end
+                current_mode = None
+                offline_mode_instance = None
                 conversation_ended_event.set()
     except Exception as e:
         print(f"Error during offline mode: {e}")
         # Only set event if we're still in offline mode AND not switching modes
         with mode_lock:
             if current_mode == 'offline' and not switching_modes.is_set():
+                # Set mode to None BEFORE setting the event so monitor_connectivity() can properly detect the end
+                current_mode = None
+                offline_mode_instance = None
                 conversation_ended_event.set()
     finally:
         with mode_lock:
+            # Only clean up if not already done above
             if current_mode == 'offline':
                 current_mode = None
                 offline_mode_instance = None
@@ -659,7 +725,7 @@ if __name__ == "__main__":
     
     def signal_handler(sig, frame):
         print("\n\nReceived interrupt signal...")
-        global stop_monitoring, should_exit_program, flask_server, flask_thread
+        global stop_monitoring, should_exit_program, flask_server, flask_thread, reminder_scheduler
         stop_monitoring.set()
         should_exit_program = True
         stop_current_mode()
@@ -672,6 +738,12 @@ if __name__ == "__main__":
                 print(f"Error shutting down Flask server: {e}")
         if flask_thread and flask_thread.is_alive():
             flask_thread.join(timeout=5)
+        if reminder_scheduler:
+            print("Shutting down reminder scheduler...")
+            try:
+                reminder_scheduler.shutdown()
+            except Exception as e:
+                print(f"Error shutting down reminder scheduler: {e}")
         print("Shutdown complete. Goodbye!")
         os._exit(0)
     
