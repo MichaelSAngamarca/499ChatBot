@@ -13,7 +13,7 @@ def speak(text, rate=150, volume=0.9):
         engine.runAndWait()
         engine.stop()
     except Exception as e:
-        print(f"TTS Error: {e}")
+        pass
 
 class HotkeyHandler:
     def __init__(self, hotkey='ctrl+shift+a', wake_phrase="hey talk assist", model_size="base"):
@@ -51,7 +51,6 @@ class HotkeyHandler:
         try:
             self.callback()
         except Exception as e:
-            print(f"Error in callback: {e}")
             self.reset_running_state()
     
     def _start_wake_word_detection(self):
@@ -78,7 +77,6 @@ class HotkeyHandler:
             self.is_running = False
             
         except Exception as e:
-            print(f"Error in wake word detection: {e}")
             self.is_listening = False
             self.is_running = False
     
@@ -86,13 +84,6 @@ class HotkeyHandler:
         if self.hotkey_registered:
             print("Hotkey handler is already listening.")
             return
-        
-        print("="*60)
-        print("TalkAssist - Global Hotkey Mode")
-        print("="*60)
-        print(f"Press [{self.hotkey.upper()}] to activate TalkAssist")
-        print("Press Ctrl+C to exit")
-        print("="*60 + "\n")
         
         speak("Press the hotkey to start application")
         
@@ -105,7 +96,6 @@ class HotkeyHandler:
             self.stop()
     
     def stop(self):
-        print("\nStopping hotkey handler...")
         self.is_running = False
         self.is_listening = False
         
@@ -116,8 +106,6 @@ class HotkeyHandler:
         if self.hotkey_registered:
             keyboard.unhook_all()
             self.hotkey_registered = False
-        
-        print("Hotkey handler stopped.")
 
 
 if __name__ == "__main__":

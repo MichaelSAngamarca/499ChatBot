@@ -9,15 +9,13 @@ import whisper
 import pyttsx3
 import pyaudio
 import numpy as np
-from datetime import datetime
+from datetime import datetime, timedelta
 from apscheduler.schedulers.background import BackgroundScheduler
 import json
 import threading
 from time_parser import TimeParser
 import re
 from math_parser import MathParser
-from reminder_manager import get_reminder_manager
-
 class OfflineMode:
     def __init__(self):
         print ("loading the whisper model...")
@@ -27,6 +25,7 @@ class OfflineMode:
         self.tts_volume = 0.9
 
         self.math_parser = MathParser()
+        self.time_parser = TimeParser()
         # initializing the scheduler here
         self.scheduler = BackgroundScheduler()
         self.scheduler.start()
@@ -34,13 +33,14 @@ class OfflineMode:
         self.FORMAT = pyaudio.paInt16
         self.CHANNELS = 1
         self.RATE = 16000
-
+        
+        self.reminders_file = "reminders.json"
         
         # control for cooperative shutdown
         self._stop_event = threading.Event()
-
-        # Use shared reminder manager
-        self.reminder_manager = get_reminder_manager(scheduler=self.scheduler)
+        
+        # Load existing reminders into scheduler
+        self._load_existing_reminders()
         self.is_running = False
 
     def speak(self, text):
@@ -215,12 +215,12 @@ class OfflineMode:
         
          #getting the list of reminders
         if any (word in text_lower for word in ["list reminders", "show reminders", "what are my reminders", "my reminders"]):
-            self.reminder_manager.list_reminders(callback_speak=self.speak)
+            self.list_reminders()
             return True
         
         # for setting reminders
         if (re.search(r'\bremind\s+me\b', text_lower) or "set a reminder" in text_lower or "reminder to" in text_lower or "need to" in text_lower or "have to" in text_lower):
-            self.reminder_manager.set_reminder(text, callback_speak=self.speak)
+            self.set_reminder(text)
             return True
         
        
@@ -236,7 +236,7 @@ class OfflineMode:
         
         # for clearing all reminders
         if any(word in text_lower for word in ["clear all reminders","delete all reminders", "remove all reminders", "cancel all reminders"]):
-            self.reminder_manager.clear_all_reminders(callback_speak=self.speak)
+            self.clear_all_reminders()
             return True
         
         time_keywords = ["tonight", "tomorrow", "today", "monday", "tuesday", "wednesday", 
@@ -257,14 +257,158 @@ class OfflineMode:
         self.speak("I'm sorry, I can only tell the time, date, set reminders, and list reminders in offline mode.")
         return True
     
+    def _load_existing_reminders(self):
+        """Load existing reminders from JSON and schedule them."""
+        if os.path.exists(self.reminders_file):
+            try:
+                with open(self.reminders_file, 'r') as f:
+                    reminders = json.load(f)
+                
+                now = datetime.now()
+                for reminder in reminders:
+                    if reminder.get("active", True):
+                        reminder_time = datetime.fromisoformat(reminder['time'])
+                        if reminder_time > now:
+                            job_id = f"reminder_{reminder['id']}"
+                            try:
+                                self.scheduler.add_job(
+                                    self.trigger_reminder,
+                                    'date',
+                                    run_date=reminder_time,
+                                    args=[reminder['id'], reminder['text']],
+                                    id=job_id
+                                )
+                            except Exception as e:
+                                print(f"Error scheduling reminder {reminder['id']}: {e}")
+            except Exception as e:
+                print(f"Error loading reminders: {e}")
+    
+    def _extract_task_from_text(self, text):
+        """Extract the task description from text, removing time information."""
+        time_patterns = [
+            r'in\s+\d+\s+(minute|minutes|min|mins|hour|hours|hr|hrs|day|days)\b',
+            r'\btomorrow\s+at\s+',
+            r'\btoday\s+at\s+',
+            r'\bon\s+(monday|tuesday|wednesday|thursday|friday|saturday|sunday)\s+at\s+',
+            r'\bat\s+\d{1,2}[:.]?\d{0,2}\s*(am|pm|a\.m\.|p\.m\.)\b',
+            r'\b\d{1,2}[:.]?\d{0,2}\s*(am|pm|a\.m\.|p\.m\.)\b',
+            r'\bon\s+(monday|tuesday|wednesday|thursday|friday|saturday|sunday)\b',
+            r'\bnext\s+(monday|tuesday|wednesday|thursday|friday|saturday|sunday)\b',
+            r'\b(morning|afternoon|evening|night|tonight)\b',
+            r'\bnext\s+week\b',
+        ]
+        
+        task = text
+        for pattern in time_patterns:
+            task = re.sub(pattern, '', task, flags=re.IGNORECASE)
+        
+        task = re.sub(r'\b(monday|tuesday|wednesday|thursday|friday|saturday|sunday)\b', '', task, flags=re.IGNORECASE)
+        task = re.sub(r'\b(tomorrow|today)\b', '', task, flags=re.IGNORECASE)
+        task = re.sub(r'\b(to\s+)?morrow\b', '', task, flags=re.IGNORECASE)
+        task = re.sub(r'[.,!?]+', '', task)
+        task = re.sub(r'\s+', ' ', task)
+        task = task.strip()
+        task = re.sub(r'^(to|at|on|in)\s+', '', task, flags=re.IGNORECASE)
+        task = re.sub(r'\s+(to|at|on|in)$', '', task, flags=re.IGNORECASE)
+        
+        if len(task) < 3 or task.isdigit():
+            return ""
+        
+        return task
+    
     def set_reminder(self, text):
-        # This method is now handled by reminder_manager, but kept for compatibility
-        self.reminder_manager.set_reminder(text, callback_speak=self.speak)
-
-
+        """Set a reminder from natural language text."""
+        # Load existing reminders
+        if os.path.exists(self.reminders_file):
+            try:
+                with open(self.reminders_file, 'r') as f:
+                    reminders = json.load(f)
+            except:
+                reminders = []
+        else:
+            reminders = []
+        
+        # Clean and preprocess text
+        raw_lower = text.lower().strip()
+        cleaned = text.strip()
+        
+        # Remove trigger prefixes
+        trigger_prefix = re.compile(
+            r'^(?:'
+            r'remind\s+me(?:\s+to)?'
+            r'|set\s+(?:a\s+)?reminder(?:\s+to)?'
+            r'|remember\s+to'
+            r'|we\s+(?:need|have)\s+to'
+            r')\s+',
+            re.IGNORECASE
+        )
+        m = trigger_prefix.match(cleaned.lower())
+        if m:
+            cleaned = cleaned[m.end():].strip()
+        
+        cleaned = re.sub(r'^\bmorrow\b', 'tomorrow', cleaned, flags=re.IGNORECASE)
+        cleaned = re.sub(r'\bto\s+morrow\b', 'tomorrow', cleaned, flags=re.IGNORECASE)
+        
+        if not cleaned:
+            self.speak("What would you like me to remind you about?")
+            return
+        
+        # Parse time
+        parsed_time, success, error = self.time_parser.parse_time(cleaned)
+        
+        if not success:
+            # Default to 1 minute from now if parsing fails
+            reminder_time = datetime.now() + timedelta(minutes=1)
+            reminder_text = cleaned
+            self.speak("I could not understand the time. Setting reminder for 1 minute from now.")
+        else:
+            reminder_time = parsed_time
+            converted_text = self.time_parser._convert_words_to_numbers(cleaned)
+            reminder_text = self._extract_task_from_text(converted_text)
+            if not reminder_text or len(reminder_text) < 3:
+                reminder_text = cleaned
+            reminder_text = re.sub(r'\b(we\s+)?remind\s+me(\s+to)?\b', '', reminder_text, flags=re.IGNORECASE).strip()
+            reminder_text = re.sub(r'^(for|to)\s+', '', reminder_text, flags=re.IGNORECASE).strip()
+        
+        # Get next reminder ID
+        reminder_id = max([r.get('id', 0) for r in reminders], default=0) + 1
+        
+        # Create reminder
+        reminder = {
+            "id": reminder_id,
+            "text": reminder_text,
+            "time": reminder_time.isoformat(),
+            "active": True,
+        }
+        
+        reminders.append(reminder)
+        
+        # Write to JSON file
+        try:
+            with open(self.reminders_file, 'w') as f:
+                json.dump(reminders, f, indent=4)
+        except Exception as e:
+            print(f"Error saving reminder: {e}")
+            self.speak("Sorry, I couldn't save the reminder.")
+            return
+        
+        # Schedule reminder
+        job_id = f"reminder_{reminder_id}"
+        try:
+            self.scheduler.add_job(
+                self.trigger_reminder,
+                'date',
+                run_date=reminder_time,
+                args=[reminder_id, reminder_text],
+                id=job_id
+            )
+        except Exception as e:
+            print(f"Error scheduling reminder: {e}")
+        
+        human_time = self.time_parser.format_time_human(reminder_time)
+        self.speak(f"Reminder set for {human_time}: {reminder_text}")
     
     def delete_reminder_by_number(self, text):
-        import re
         text_lower = text.lower().strip()
         match = re.search(r'(\d+)', text_lower)
         if match:
@@ -288,12 +432,56 @@ class OfflineMode:
                     self.speak("Please say the reminder number, for example 'delete reminder number 2'.")
                     return
         
-        success, msg = self.reminder_manager.delete_reminder_by_number(reminder_number, callback_speak=self.speak)
-        if not success:
-            self.speak(msg)
+        # Load reminders
+        if not os.path.exists(self.reminders_file):
+            self.speak("You have no reminders to delete.")
+            return
+        
+        try:
+            with open(self.reminders_file, 'r') as f:
+                reminders = json.load(f)
+        except:
+            self.speak("Error loading reminders.")
+            return
+        
+        now = datetime.now()
+        active_reminders = sorted(
+            [r for r in reminders if r.get("active", True) and datetime.fromisoformat(r['time']) > now],
+            key=lambda r: datetime.fromisoformat(r['time'])
+        )
+        
+        if not active_reminders:
+            self.speak("You have no active reminders to delete.")
+            return
+        
+        if reminder_number < 1 or reminder_number > len(active_reminders):
+            self.speak(f"Invalid reminder number. You have {len(active_reminders)} active reminders.")
+            return
+        
+        reminder_to_delete = active_reminders[reminder_number - 1]
+        
+        # Mark as inactive
+        for r in reminders:
+            if r['id'] == reminder_to_delete['id']:
+                r['active'] = False
+                break
+        
+        # Remove from scheduler
+        job_id = f"reminder_{reminder_to_delete['id']}"
+        try:
+            self.scheduler.remove_job(job_id)
+        except:
+            pass
+        
+        # Save to JSON
+        try:
+            with open(self.reminders_file, 'w') as f:
+                json.dump(reminders, f, indent=4)
+            self.speak(f"Reminder number {reminder_number} deleted: {reminder_to_delete['text']}")
+        except:
+            self.speak("Error deleting reminder.")
         
     def delete_reminder_by_content(self, text):
-        import re
         text_lower = text.lower()
         for phrase in ['delete the', "remove the", "cancel the", "delete", "cancel", "reminder about", "reminder to", "reminder"]:
             text_lower = text_lower.replace(phrase, "")
@@ -301,8 +489,21 @@ class OfflineMode:
         if not text_lower or len(text_lower) < 3:
             self.speak("Please tell me what the reminder is about. For example, say 'delete the reminder about calling mom'")
             return
+        
+        # Load reminders
+        if not os.path.exists(self.reminders_file):
+            self.speak("You have no active reminder to delete.")
+            return
+        
+        try:
+            with open(self.reminders_file, 'r') as f:
+                reminders = json.load(f)
+        except:
+            self.speak("Error loading reminders.")
+            return
+        
         now = datetime.now()
-        active_reminders = [r for r in self.reminder_manager.reminders if r.get("active", True) and datetime.fromisoformat(r['time']) > now]
+        active_reminders = [r for r in reminders if r.get("active", True) and datetime.fromisoformat(r['time']) > now]
         if not active_reminders:
             self.speak("You have no active reminder to delete.")
             return
@@ -318,11 +519,26 @@ class OfflineMode:
             return
         if len(matching_reminders) == 1:
             reminder = matching_reminders[0]
-            success, msg = self.reminder_manager.delete_reminder_by_id(reminder['id'])
-            if success:
+            # Mark as inactive
+            for r in reminders:
+                if r['id'] == reminder['id']:
+                    r['active'] = False
+                    break
+            
+            # Remove from scheduler
+            job_id = f"reminder_{reminder['id']}"
+            try:
+                self.scheduler.remove_job(job_id)
+            except:
+                pass
+            
+            # Save to JSON
+            try:
+                with open(self.reminders_file, 'w') as f:
+                    json.dump(reminders, f, indent=4)
                 self.speak(f"Deleted reminder: {reminder['text']}")
-            else:
-                self.speak("failed to delete the reminder. Please try again")
+            except:
+                self.speak("Failed to delete the reminder. Please try again")
         else:
             matching_reminders.sort(key=lambda r: datetime.fromisoformat(r['time']))
             self.speak(f"I found {len(matching_reminders)} reminders matching your request:")
@@ -332,23 +548,115 @@ class OfflineMode:
             self.speak("Please say ' delete reminder number' followed by the number you want to delete")
     
     def delete_reminder_by_id(self, reminder_id):
-        # Use shared reminder manager
-        success, msg = self.reminder_manager.delete_reminder_by_id(reminder_id)
-        return success
+        """Delete a reminder by ID."""
+        if not os.path.exists(self.reminders_file):
+            return False
         
+        try:
+            with open(self.reminders_file, 'r') as f:
+                reminders = json.load(f)
+        except:
+            return False
+        
+        for r in reminders:
+            if r['id'] == reminder_id:
+                r['active'] = False
+                break
+        
+        # Remove from scheduler
+        job_id = f"reminder_{reminder_id}"
+        try:
+            self.scheduler.remove_job(job_id)
+        except:
+            pass
+        
+        # Save to JSON
+        try:
+            with open(self.reminders_file, 'w') as f:
+                json.dump(reminders, f, indent=4)
+            return True
+        except:
+            return False
 
-    #function to clear or cancel all reminders
     def clear_all_reminders(self):
-        self.reminder_manager.clear_all_reminders(callback_speak=self.speak)
-
+        """Clear all reminders."""
+        if not os.path.exists(self.reminders_file):
+            self.speak("You have no reminders to clear.")
+            return
+        
+        try:
+            with open(self.reminders_file, 'r') as f:
+                reminders = json.load(f)
+        except:
+            self.speak("Error loading reminders.")
+            return
+        
+        # Remove all jobs from scheduler
+        for reminder in reminders:
+            job_id = f"reminder_{reminder['id']}"
+            try:
+                self.scheduler.remove_job(job_id)
+            except:
+                pass
+        
+        # Clear reminders
+        reminders = []
+        
+        # Save to JSON
+        try:
+            with open(self.reminders_file, 'w') as f:
+                json.dump(reminders, f, indent=4)
+            self.speak("All reminders have been cleared.")
+        except:
+            self.speak("Error clearing reminders.")
 
     def trigger_reminder(self, reminder_id, reminder_text):
-        # This is now handled by reminder_manager, but we override to use our speak function
+        """Trigger a reminder when its time is reached."""
         self.speak(f"Reminder: {reminder_text}")
+        # Mark as inactive
+        if os.path.exists(self.reminders_file):
+            try:
+                with open(self.reminders_file, 'r') as f:
+                    reminders = json.load(f)
+                for r in reminders:
+                    if r['id'] == reminder_id:
+                        r['active'] = False
+                with open(self.reminders_file, 'w') as f:
+                    json.dump(reminders, f, indent=4)
+            except:
+                pass
 
     def list_reminders(self):
-        # Use shared reminder manager
-        self.reminder_manager.list_reminders(callback_speak=self.speak)
+        """List all active reminders."""
+        if not os.path.exists(self.reminders_file):
+            self.speak("You have no active reminders.")
+            return
+        
+        try:
+            with open(self.reminders_file, 'r') as f:
+                reminders = json.load(f)
+        except:
+            self.speak("Error loading reminders.")
+            return
+        
+        now = datetime.now()
+        active_reminders = [
+            r for r in reminders 
+            if r.get("active", True) and datetime.fromisoformat(r['time']) > now
+        ]
+        
+        if not active_reminders:
+            self.speak("You have no active reminders.")
+            return
+        
+        active_reminders.sort(key=lambda r: datetime.fromisoformat(r['time']))
+        count = len(active_reminders)
+        
+        self.speak(f"You have {count} active reminder{'s' if count > 1 else ''}")
+        for i, reminder in enumerate(active_reminders, 1):
+            reminder_time = datetime.fromisoformat(reminder['time'])
+            time_str = reminder_time.strftime("%I:%M %p on %B %d")
+            self.speak(f"Reminder {i} at {time_str}: {reminder['text']}")
 
     def run(self):
         print("\n" + "="*60)

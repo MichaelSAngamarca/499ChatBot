@@ -204,13 +204,22 @@ def set_reminder(parameters):
     import re
     from datetime import datetime, timedelta
     from time_parser import TimeParser
-    from main import reminder_scheduler, speak
+    
+    print(f"[DEBUG] set_reminder called with parameters: {parameters}")
+    
+    try:
+        from main import reminder_scheduler, speak
+    except ImportError as e:
+        print(f"[ERROR] Failed to import reminder_scheduler or speak: {e}")
+        return f"Error: Could not access reminder system. {e}"
     
     text = parameters.get("text") if parameters else None
     if not text:
+        print("[DEBUG] No text parameter provided")
         return "Please provide the reminder text. For example: 'remind me to call mom tomorrow at 3pm'"
     
     reminders_file = "reminders.json"
+    print(f"[DEBUG] Processing reminder: {text}")
     time_parser = TimeParser()
     
     # Load existing reminders
@@ -311,19 +320,24 @@ def set_reminder(parameters):
     # Get next reminder ID
     reminder_id = max([r.get('id', 0) for r in reminders], default=0) + 1
     
-    # Create reminder
+    # Create reminder in the exact format: {"id": int, "text": str, "time": "ISO8601", "active": bool}
     reminder = {
         "id": reminder_id,
         "text": reminder_text,
-        "time": reminder_time.isoformat(),
+        "time": reminder_time.isoformat(),  # ISO format: "2025-11-06T21:00:00"
         "active": True,
     }
     
     reminders.append(reminder)
     
-    # Save to JSON
-    with open(reminders_file, 'w') as f:
-        json.dump(reminders, f, indent=4)
+    # Write directly to reminders.json file (same format as offline mode)
+    try:
+        with open(reminders_file, 'w') as f:
+            json.dump(reminders, f, indent=4)
+        print(f"[DEBUG] Successfully wrote reminder to {reminders_file}: {reminder}")
+    except Exception as e:
+        print(f"[ERROR] Failed to write to {reminders_file}: {e}")
+        return f"Error saving reminder: {e}"
     
     # Schedule reminder
     def trigger_reminder(reminder_id, reminder_text):
@@ -338,16 +352,23 @@ def set_reminder(parameters):
             with open(reminders_file, 'w') as f:
                 json.dump(reminders, f, indent=4)
     
-    reminder_scheduler.add_job(
-        trigger_reminder,
-        'date',
-        run_date=reminder_time,
-        args=[reminder_id, reminder_text],
-        id=f"reminder_{reminder_id}"
-    )
+    try:
+        reminder_scheduler.add_job(
+            trigger_reminder,
+            'date',
+            run_date=reminder_time,
+            args=[reminder_id, reminder_text],
+            id=f"reminder_{reminder_id}"
+        )
+        print(f"[DEBUG] Scheduled reminder job: reminder_{reminder_id}")
+    except Exception as e:
+        print(f"[ERROR] Failed to schedule reminder: {e}")
+        # Still return success since reminder is saved to JSON
     
     human_time = time_parser.format_time_human(reminder_time)
-    return f"Reminder set for {human_time}: {reminder_text}"
+    result = f"Reminder set for {human_time}: {reminder_text}"
+    print(f"[DEBUG] Returning result: {result}")
+    return result
 
 def list_reminders(parameters):
     """
