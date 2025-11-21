@@ -11,8 +11,8 @@ openai-whisper
 pyttsx3
 apscheduler
 requests 
-os
 pynput
 keyboard
-re
 word2number
+werkzeug
+flask
